@@ -1,0 +1,122 @@
+name: NanoPi-R2S RK3328 OpenWrt 19.07 Build
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-18.04
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@master
+        with:
+          ref: master
+
+      - name: Initialization Environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk
+          docker image prune -a -f
+          sudo apt-get -y purge dotnet* ghc* google* llvm* mysql* php* zulu* firefox hhvm powershell
+          sudo apt-get -y autoremove --purge          
+          wget -O - https://raw.githubusercontent.com/friendlyarm/build-env-on-ubuntu-bionic/master/install.sh | bash
+
+      #- name: Setup Debug Session
+      #  uses: P3TERX/debugger-action@master
+  
+      - name: Install Repo
+        run: |
+          git clone https://github.com/friendlyarm/repo
+          sudo cp repo/repo /usr/bin/
+
+      - name: Download Source
+        run: |
+          mkdir friendlywrt-rk3328
+          cd friendlywrt-rk3328
+          repo init -u https://github.com/friendlyarm/friendlywrt_manifests -b master -m rk3328.xml --repo-url=https://github.com/friendlyarm/repo --no-clone-bundle
+
+      - name: Merge UpStearm OpenWrt
+        run: |
+          cd friendlywrt-rk3328
+          cd .repo/manifests
+          wget https://raw.githubusercontent.com/soffchen/NanoPi-R2S-Build-By-Actions/master/source_xml/rk3328_19.07.xml
+          mv rk3328_19.07.xml rk3328.xml
+          repo sync -c --no-clone-bundle
+
+      - name: Merge LEDE
+        run: |
+          cd friendlywrt-rk3328
+          git clone https://github.com/coolsnowwolf/lede
+          cd friendlywrt
+          cp -r ../lede/package/lean package/
+          cp -r ../lede/tools/upx tools/
+          sed -i 's/https:\/\/git.openwrt.org\/project\/luci.git^039ef1f4deba725d3591b159bbc9569885d68131/https:\/\/github.com\/coolsnowwolf\/luci/' feeds.conf.default
+          sed -i 's/https:\/\/git.openwrt.org\/feed\/packages.git^00803ffc91e80b16e9c1603ff32106d42e255923/https:\/\/github.com\/coolsnowwolf\/packages/' feeds.conf.default
+
+      - name: Luci for Clash
+        run: |
+          cd friendlywrt-rk3328/friendlywrt/package
+          git clone https://github.com/frainzy1477/luci-app-clash
+          mkdir -p friendlywrt-rk3328/friendlywrt/package/base-files/files/etc/clash
+          cd friendlywrt-rk3328/friendlywrt/package/base-files/files/etc/clash
+          wget https://github.com/frainzy1477/clash_dev/releases/download/v0.17.2/clash-linux-armv8-v0.17.2.gz
+          gunzip clash-linux-armv8-v0.17.2.gz
+          chmod +x clash-linux-armv8-v0.17.2
+          mv clash-linux-armv8-v0.17.2 clash
+          mkdir -p friendlywrt-rk3328/friendlywrt/package/base-files/files/usr/share/clash
+          cd friendlywrt-rk3328/friendlywrt/package/base-files/files/usr/share/clash
+          echo 0.17.2 > core_version
+
+      - name: Update Target.mk
+        run: |
+          cd friendlywrt-rk3328/friendlywrt/include
+          sed -i 's/dnsmasq /dnsmasq-full default-settings luci /' target.mk
+
+      - name: Update Feeds
+        run: |
+          cd friendlywrt-rk3328/friendlywrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Costom Configure File
+        run: |
+          cd friendlywrt-rk3328/friendlywrt
+          rm -f ./.config*
+          wget https://raw.githubusercontent.com/soffchen/NanoPi-R2S-Build-By-Actions/master/r2s-rk3328-config
+          cp r2s-rk3328-config .config
+
+      - name: Download package
+        if: always()
+        run: |
+          cd friendlywrt-rk3328/friendlywrt
+          make download -j8
+          find dl -size -1024c -exec ls -l {} \;
+          find dl -size -1024c -exec rm -f {} \;
+
+      - name: Build OpenWrt
+        run: |
+          cd friendlywrt-rk3328
+          ./build.sh nanopi_r2s.mk
+
+      - name: Zip Files
+        run: |
+          find friendlywrt-rk3328/out/ -name "FriendlyWrt_*img*" | xargs -i zip -r {}.zip {}
+
+      - name: Assemble Artifact
+        run: |
+          rm -rf ./artifact/
+          mkdir -p ./artifact/
+          find friendlywrt-rk3328/out/ -name "FriendlyWrt_*img.zip*" | xargs -i mv -f {} ./artifact/
+      - name: Upload Artifact
+        uses: actions/upload-artifact@master
+        with:
+          name: FriendlyWrt_NanoPi-R2S RK3328 v19.07
+          path: ./artifact/
