@@ -27,7 +27,7 @@
 ## 用法
 Fork 到自己的账号下，将 `.github/workflows` 下 `.yml` 文件中的 `runs-on: self-hosted` 改成 `runs-on: ubuntu-latest`（因为我是自己的服务器上编译，更快），编辑文件 `CHANGELOG.md` 触发编译动作。
 
-## 注意
+## 注意1
 产品发布初期，官方代码每天都在变，遇到无法编译时，请过来查看 `.yml` 与 `config` 最新异动。
 
 ## 参考
